@@ -1,583 +1,1012 @@
 
 package com.bondhubazar.categorycard.bondhucategorycard;
 
-// Android Context
+// ==========================================
+// Android Imports
+// ==========================================
+
 import android.content.Context;
-
-// Android View
-import android.view.View;
-import android.view.ViewGroup;
-
-// LinearLayout
-import android.widget.LinearLayout;
-
-// ImageView
-import android.widget.ImageView;
-
-// TextView
-import android.widget.TextView;
-
-// Background Shape
-import android.graphics.drawable.GradientDrawable;
-
-// Ripple Effect
-import android.graphics.drawable.RippleDrawable;
 import android.content.res.ColorStateList;
-
-// Android Color
-import android.graphics.Color;
-
-// Image Bitmap
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
-// Internet Connection
 import java.net.URL;
 import java.net.HttpURLConnection;
-
-// Collections
+import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
-// App Inventor Extension
-import com.google.appinventor.components.annotations.Extension;
-import com.google.appinventor.components.runtime.AndroidViewComponent;
-import com.google.appinventor.components.annotations.SimpleFunction;
-import com.google.appinventor.components.annotations.SimpleEvent;
-import com.google.appinventor.components.runtime.AndroidNonvisibleComponent;
-import com.google.appinventor.components.runtime.ComponentContainer;
-import com.google.appinventor.components.runtime.EventDispatcher;
+// ==========================================
+// App Inventor Imports
+// ==========================================
 
-@Extension(
-    description = "Bondhu Bazar Category Card Extension"
+import com.google.appinventor.components.annotations.*;
+import com.google.appinventor.components.common.ComponentCategory;
+import com.google.appinventor.components.runtime.*;
+
+// ==========================================
+// Extension Designer
+// ==========================================
+
+@DesignerComponent(
+    version = 2,
+    description = "Bondhu Bazar Category Card Extension V2",
+    category = ComponentCategory.EXTENSION,
+    nonVisible = true,
+    iconName = "images/extension.png"
+)
+
+@SimpleObject(external = true)
+
+@UsesPermissions(
+    permissionNames =
+    "android.permission.INTERNET"
 )
 
 public class BondhuCategoryCard
-        extends AndroidNonvisibleComponent {
+    extends AndroidNonvisibleComponent {
 
-    // Android Context
+    // ======================================
+    // Global Variables
+    // ======================================
+
     private Context context;
 
-    // Category Card রাখার Map
-    private Map<String, LinearLayout> cards = new HashMap<>();
+    private Handler handler;
 
-    // Category Image রাখার Map
-    private Map<String, ImageView> images = new HashMap<>();
+    // সব Card সংরক্ষণ
+    private ArrayList<View> cardList =
+        new ArrayList<View>();
 
-    // Category Name রাখার Map
-    private Map<String, TextView> titles = new HashMap<>();
+    // Card-এর ID সংরক্ষণ
+    private ArrayList<CardInfo> cardInfoList =
+        new ArrayList<CardInfo>();
 
-    // Category Card-এর Background রাখার Map
-    private Map<String, GradientDrawable> backgrounds = new HashMap<>();
+    // Image Request সংরক্ষণ
+    private HashMap<ImageView, Future<?>> imageTasks =
+        new HashMap<ImageView, Future<?>>();
 
+    // Image Load করার জন্য Thread Pool
+    private ExecutorService executor =
+        Executors.newFixedThreadPool(3);
+
+    // Card Design Settings
+    private int cardRadius = 12;
+
+    private int cardColor = Color.WHITE;
+
+    private int titleColor = Color.BLACK;
+
+    private int imageHeight = 75;
+
+    private int placeholderColor =
+        Color.LTGRAY;
+
+    private int rippleColor =
+        Color.parseColor("#33000000");
+
+    private float cardElevation = 4f;
+
+    // ======================================
+    // Card Information Class
+    // ======================================
+
+    private static class CardInfo {
+
+        String id;
+        String title;
+
+        CardInfo(String id, String title) {
+
+            this.id = id;
+            this.title = title;
+        }
+    }
+
+    // ======================================
     // Constructor
-    public BondhuCategoryCard(ComponentContainer container) {
+    // ======================================
+
+    public BondhuCategoryCard(
+        ComponentContainer container) {
 
         super(container.$form());
 
-        // Context নেওয়া
         context = container.$context();
+
+        handler = new Handler(
+            Looper.getMainLooper()
+        );
     }
 
-    // =========================================
-    // ১. Category Card তৈরি করা
-    // =========================================
+    // ======================================
+    // Add Category Card V1 Compatible
+    // ======================================
 
     @SimpleFunction(
-        description = "Category Card তৈরি করুন"
+        description = "Horizontal Arrangement-এ Category Card তৈরি করে"
     )
-    public void CreateCategoryCard(
-            ComponentContainer parent,
-            String categoryId,
-            String categoryName,
-            int width,
-            int height
+
+    public void AddCategoryCard(
+        AndroidViewComponent arrangement,
+        String title,
+        String imageUrl,
+        int width,
+        int height
     ) {
+
+        AddCategoryCardInternal(
+            arrangement,
+            "",
+            title,
+            imageUrl,
+            width,
+            height
+        );
+    }
+
+    // ======================================
+    // Add Category Card With ID
+    // ======================================
+
+    @SimpleFunction(
+        description = "Category ID সহ নতুন Card তৈরি করে"
+    )
+
+    public void AddCategoryCardWithId(
+        AndroidViewComponent arrangement,
+        String categoryId,
+        String title,
+        String imageUrl,
+        int width,
+        int height
+    ) {
+
+        AddCategoryCardInternal(
+            arrangement,
+            categoryId,
+            title,
+            imageUrl,
+            width,
+            height
+        );
+    }
+
+    // ======================================
+    // Main Card Creation Function
+    // ======================================
+
+    private void AddCategoryCardInternal(
+        AndroidViewComponent arrangement,
+        String categoryId,
+        String title,
+        String imageUrl,
+        int width,
+        int height
+    ) {
+
+        // Arrangement Null Check
+        if (arrangement == null) {
+
+            ErrorOccurred(
+                "Arrangement is null"
+            );
+
+            return;
+        }
+
+        // Size Validation
+        if (width <= 0 || height <= 0) {
+
+            ErrorOccurred(
+                "Card width and height must be greater than zero"
+            );
+
+            return;
+        }
+
+        // Parent View খোঁজা
+        View target = arrangement.getView();
+
+        LinearLayout parent =
+            findLinearLayout(target);
+
+        if (parent == null) {
+
+            ErrorOccurred(
+                "LinearLayout not found inside Arrangement"
+            );
+
+            return;
+        }
+
+        // ==================================
+        // Main Card Layout
+        // ==================================
+
+        LinearLayout card =
+            new LinearLayout(context);
+
+        card.setOrientation(
+            LinearLayout.VERTICAL
+        );
+
+        card.setGravity(
+            Gravity.CENTER
+        );
+
+        card.setClickable(true);
+
+        card.setFocusable(true);
+
+        // ==================================
+        // Card Background
+        // ==================================
+
+        GradientDrawable background =
+            new GradientDrawable();
+
+        background.setColor(cardColor);
+
+        background.setCornerRadius(
+            dp(cardRadius)
+        );
+
+        card.setBackground(background);
+
+        // Elevation
+        card.setElevation(
+            dp(cardElevation)
+        );
+
+        // ==================================
+        // Ripple Effect
+        // ==================================
+
+        if (Build.VERSION.SDK_INT >= 21) {
+
+            GradientDrawable mask =
+                new GradientDrawable();
+
+            mask.setColor(Color.WHITE);
+
+            mask.setCornerRadius(
+                dp(cardRadius)
+            );
+
+            RippleDrawable ripple =
+                new RippleDrawable(
+                    ColorStateList.valueOf(rippleColor),
+                    null,
+                    mask
+                );
+
+            card.setForeground(ripple);
+        }
+
+        // ==================================
+        // Card Layout Parameters
+        // ==================================
+
+        LinearLayout.LayoutParams cardParams =
+            new LinearLayout.LayoutParams(
+                dp(width),
+                dp(height)
+            );
+
+        cardParams.setMargins(
+            dp(5),
+            dp(5),
+            dp(5),
+            dp(5)
+        );
+
+        // ==================================
+        // Image View
+        // ==================================
+
+        final ImageView image =
+            new ImageView(context);
+
+        image.setScaleType(
+            ImageView.ScaleType.CENTER_CROP
+        );
+
+        image.setBackgroundColor(
+            placeholderColor
+        );
+
+        image.setImageDrawable(null);
+
+        // Card Height অনুযায়ী Image Height
+        int actualImageHeight =
+            Math.min(
+                imageHeight,
+                Math.max(1, height - 35)
+            );
+
+        LinearLayout.LayoutParams imageParams =
+            new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(actualImageHeight)
+            );
+
+        image.setLayoutParams(imageParams);
+
+        // ==================================
+        // Title Text
+        // ==================================
+
+        TextView text =
+            new TextView(context);
+
+        text.setText(
+            title == null ? "" : title
+        );
+
+        text.setTextColor(titleColor);
+
+        text.setTextSize(14);
+
+        text.setTypeface(
+            Typeface.DEFAULT,
+            Typeface.BOLD
+        );
+
+        text.setGravity(
+            Gravity.CENTER
+        );
+
+        text.setMaxLines(2);
+
+        text.setPadding(
+            dp(3),
+            dp(2),
+            dp(3),
+            dp(2)
+        );
+
+        LinearLayout.LayoutParams textParams =
+            new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            );
+
+        text.setLayoutParams(textParams);
+
+        // ==================================
+        // Add Views Into Card
+        // ==================================
+
+        card.addView(image);
+
+        card.addView(text);
+
+        // ==================================
+        // Add Card Into Arrangement
+        // ==================================
 
         try {
 
-            // একই ID আগে থাকলে পুরনো Card সরানো
-            RemoveCategory(categoryId);
-
-            // Main Card তৈরি
-            LinearLayout card = new LinearLayout(context);
-
-            // Card Vertical Layout
-            card.setOrientation(LinearLayout.VERTICAL);
-
-            // Card Center করা
-            card.setGravity(android.view.Gravity.CENTER);
-
-            // Padding
-            card.setPadding(
-                    dp(8),
-                    dp(8),
-                    dp(8),
-                    dp(8)
+            parent.addView(
+                card,
+                cardParams
             );
 
-            // Card Background
-            GradientDrawable background = new GradientDrawable();
+        } catch (Exception e) {
 
-            // Background Color
-            background.setColor(Color.WHITE);
-
-            // Corner Radius
-            background.setCornerRadius(dp(14));
-
-            // Background Apply
-            card.setBackground(background);
-
-            // Card Click Enable
-            card.setClickable(true);
-
-            // Card-এর Shadow
-            card.setElevation(dp(3));
-
-            // Ripple Effect
-            RippleDrawable ripple = new RippleDrawable(
-                    ColorStateList.valueOf(
-                            Color.parseColor("#33000000")
-                    ),
-                    background,
-                    null
+            ErrorOccurred(
+                "Card add failed: " + e.getMessage()
             );
 
-            card.setBackground(ripple);
+            return;
+        }
 
-            // ImageView তৈরি
-            ImageView image = new ImageView(context);
+        // ==================================
+        // Save Card Information
+        // ==================================
 
-            // Image Center
-            image.setScaleType(
-                    ImageView.ScaleType.CENTER_CROP
+        final CardInfo info =
+            new CardInfo(
+                categoryId == null ? "" : categoryId,
+                title == null ? "" : title
             );
 
-            // Image Size
-            LinearLayout.LayoutParams imageParams =
-                    new LinearLayout.LayoutParams(
-                            dp(65),
-                            dp(65)
-                    );
+        cardList.add(card);
 
-            // ImageView-এর Layout
-            image.setLayoutParams(imageParams);
+        cardInfoList.add(info);
 
-            // TextView তৈরি
-            TextView title = new TextView(context);
+        final int index =
+            cardList.size() - 1;
 
-            // Category Name
-            title.setText(categoryName);
+        // ==================================
+        // Card Click Listener
+        // ==================================
 
-            // Text Color
-            title.setTextColor(Color.parseColor("#222222"));
-
-            // Text Size
-            title.setTextSize(14);
-
-            // Bold Text
-            title.setTypeface(
-                    null,
-                    android.graphics.Typeface.BOLD
-            );
-
-            // Text Center
-            title.setGravity(
-                    android.view.Gravity.CENTER
-            );
-
-            // Image এবং Text-এর Gap
-            title.setPadding(
-                    0,
-                    dp(7),
-                    0,
-                    0
-            );
-
-            // Text Layout
-            LinearLayout.LayoutParams titleParams =
-                    new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT
-                    );
-
-            // Text-এর Layout Apply
-            title.setLayoutParams(titleParams);
-
-            // Image Card-এ যোগ
-            card.addView(image);
-
-            // Text Card-এ যোগ
-            card.addView(title);
-
-            // Card Width এবং Height
-            LinearLayout.LayoutParams cardParams =
-                    new LinearLayout.LayoutParams(
-                            dp(width),
-                            dp(height)
-                    );
-
-            // Card-এর চারপাশে Gap
-            cardParams.setMargins(
-                    dp(5),
-                    dp(5),
-                    dp(5),
-                    dp(5)
-            );
-
-            // Card Layout Apply
-            card.setLayoutParams(cardParams);
-
-            // Parent Layout-এ Card যোগ
-            ((AndroidViewComponent) parent).getView().addView(card);
-
-            // Map-এ Card Save
-            cards.put(categoryId, card);
-
-            // Map-এ Image Save
-            images.put(categoryId, image);
-
-            // Map-এ Title Save
-            titles.put(categoryId, title);
-
-            // Map-এ Background Save
-            backgrounds.put(categoryId, background);
-
-            // Click Listener
-            card.setOnClickListener(
-                    new View.OnClickListener() {
+        card.setOnClickListener(
+            new View.OnClickListener() {
 
                 @Override
                 public void onClick(View view) {
 
-                    // Category Click Event
+                    int currentIndex =
+                        cardList.indexOf(view);
+
+                    if (currentIndex < 0 ||
+                        currentIndex >= cardInfoList.size()) {
+
+                        return;
+                    }
+
+                    CardInfo currentInfo =
+                        cardInfoList.get(currentIndex);
+
                     CategoryClicked(
-                            categoryId,
-                            categoryName
+                        currentInfo.title,
+                        currentIndex
+                    );
+
+                    CategoryClickedWithId(
+                        currentInfo.id,
+                        currentInfo.title,
+                        currentIndex
                     );
                 }
-            });
+            }
+        );
 
-        } catch (Exception e) {
+        // ==================================
+        // Image Loading
+        // ==================================
 
-            // Error Event
-            ErrorOccurred(
-                    "CreateCategoryCard: " + e.getMessage()
+        loadImage(
+            image,
+            imageUrl,
+            title,
+            index
+        );
+
+        // ==================================
+        // Card Added Event
+        // ==================================
+
+        CardAdded(
+            title,
+            index
+        );
+    }
+
+    // ======================================
+    // Find LinearLayout
+    // ======================================
+
+    private LinearLayout findLinearLayout(
+        View view
+    ) {
+
+        if (view == null) {
+            return null;
+        }
+
+        if (view instanceof LinearLayout) {
+
+            return (LinearLayout) view;
+        }
+
+        if (view instanceof ViewGroup) {
+
+            ViewGroup group =
+                (ViewGroup) view;
+
+            for (int i = 0;
+                 i < group.getChildCount();
+                 i++) {
+
+                LinearLayout result =
+                    findLinearLayout(
+                        group.getChildAt(i)
+                    );
+
+                if (result != null) {
+
+                    return result;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // ======================================
+    // Image URL Loader
+    // ======================================
+
+    private void loadImage(
+        final ImageView image,
+        final String imageUrl,
+        final String title,
+        final int index
+    ) {
+
+        if (imageUrl == null ||
+            imageUrl.trim().isEmpty()) {
+
+            ImageLoaded(
+                title,
+                index,
+                false,
+                "Image URL is empty"
             );
-        }
-    }
 
-    // =========================================
-    // ২. Category Name পরিবর্তন
-    // =========================================
-
-    @SimpleFunction(
-        description = "Category Card-এর নাম পরিবর্তন করুন"
-    )
-    public void SetCategoryName(
-            String categoryId,
-            String categoryName
-    ) {
-
-        TextView title = titles.get(categoryId);
-
-        if (title != null) {
-
-            title.setText(categoryName);
-        }
-    }
-
-    // =========================================
-    // ৩. Category Image URL সেট করা
-    // =========================================
-
-    @SimpleFunction(
-        description = "Category Card-এ Internet Image URL সেট করুন"
-    )
-    public void SetCategoryImage(
-            String categoryId,
-            String imageUrl
-    ) {
-
-        final ImageView image = images.get(categoryId);
-
-        if (image == null) {
             return;
         }
 
-        // Background Thread-এ Image Download
-        new Thread(
-                new Runnable() {
+        final String urlString =
+            imageUrl.trim();
 
-            @Override
-            public void run() {
+        // HTTP বা HTTPS ছাড়া অন্য URL নয়
+        if (!urlString.startsWith("https://") &&
+            !urlString.startsWith("http://")) {
 
-                HttpURLConnection connection = null;
+            ImageLoaded(
+                title,
+                index,
+                false,
+                "Invalid image URL"
+            );
 
-                try {
+            return;
+        }
 
-                    // URL তৈরি
-                    URL url = new URL(imageUrl);
+        // নতুন Request Token
+        final long requestId =
+            System.nanoTime();
 
-                    // Connection তৈরি
-                    connection =
-                            (HttpURLConnection) url.openConnection();
+        image.setTag(
+            Long.valueOf(requestId)
+        );
 
-                    // Timeout
-                    connection.setConnectTimeout(10000);
-                    connection.setReadTimeout(10000);
+        Future<?> oldTask =
+            imageTasks.remove(image);
 
-                    // Request Method
-                    connection.setRequestMethod("GET");
+        if (oldTask != null) {
 
-                    // Internet থেকে Image নেওয়া
-                    connection.connect();
+            oldTask.cancel(true);
+        }
 
-                    // Image Stream
-                    Bitmap bitmap = BitmapFactory.decodeStream(
-                            connection.getInputStream()
-                    );
+        // Background Thread
+        Future<?> task =
+            executor.submit(new Runnable() {
 
-                    // Image পাওয়া গেলে
-                    if (bitmap != null) {
+                @Override
+                public void run() {
 
-                        // Main UI Thread-এ Image সেট
-                        image.post(
-                                new Runnable() {
+                    Bitmap bitmap = null;
 
-                            @Override
-                            public void run() {
+                    String error = "";
 
-                                image.setImageBitmap(bitmap);
+                    HttpURLConnection connection = null;
+
+                    InputStream input = null;
+
+                    try {
+
+                        URL url =
+                            new URL(urlString);
+
+                        connection =
+                            (HttpURLConnection)
+                            url.openConnection();
+
+                        connection.setConnectTimeout(
+                            10000
+                        );
+
+                        connection.setReadTimeout(
+                            15000
+                        );
+
+                        connection.setRequestMethod(
+                            "GET"
+                        );
+
+                        connection.setInstanceFollowRedirects(
+                            true
+                        );
+
+                        connection.connect();
+
+                        int responseCode =
+                            connection.getResponseCode();
+
+                        if (responseCode !=
+                            HttpURLConnection.HTTP_OK) {
+
+                            throw new Exception(
+                                "HTTP Error: " + responseCode
+                            );
+                        }
+
+                        input =
+                            connection.getInputStream();
+
+                        bitmap =
+                            BitmapFactory.decodeStream(
+                                input
+                            );
+
+                        if (bitmap == null) {
+
+                            throw new Exception(
+                                "Invalid image file"
+                            );
+                        }
+
+                    } catch (Exception e) {
+
+                        error = e.getMessage();
+
+                        if (error == null) {
+                            error = "Image loading failed";
+                        }
+
+                    } finally {
+
+                        try {
+
+                            if (input != null) {
+                                input.close();
                             }
-                        });
+
+                        } catch (Exception ignored) {
+                        }
+
+                        if (connection != null) {
+                            connection.disconnect();
+                        }
                     }
 
-                } catch (Exception e) {
+                    final Bitmap finalBitmap =
+                        bitmap;
 
-                    // Image Error
-                    ErrorOccurred(
-                            "SetCategoryImage: " + e.getMessage()
-                    );
+                    final String finalError =
+                        error;
 
-                } finally {
+                    // Main Thread-এ UI Update
+                    handler.post(new Runnable() {
 
-                    // Connection বন্ধ
-                    if (connection != null) {
-                        connection.disconnect();
-                    }
+                        @Override
+                        public void run() {
+
+                            Object currentTag =
+                                image.getTag();
+
+                            if (!(currentTag instanceof Long) ||
+                                ((Long) currentTag).longValue()
+                                != requestId) {
+
+                                return;
+                            }
+
+                            if (image.getParent() == null) {
+                                return;
+                            }
+
+                            imageTasks.remove(image);
+
+                            if (finalBitmap != null) {
+
+                                image.setImageBitmap(
+                                    finalBitmap
+                                );
+
+                                ImageLoaded(
+                                    title,
+                                    index,
+                                    true,
+                                    "Image loaded successfully"
+                                );
+
+                            } else {
+
+                                image.setImageDrawable(
+                                    null
+                                );
+
+                                image.setBackgroundColor(
+                                    placeholderColor
+                                );
+
+                                ImageLoaded(
+                                    title,
+                                    index,
+                                    false,
+                                    finalError
+                                );
+                            }
+                        }
+                    });
                 }
-            }
+            });
 
-        }).start();
-    }
-
-    // =========================================
-    // ৪. Background Color পরিবর্তন
-    // =========================================
-
-    @SimpleFunction(
-        description = "Category Card-এর Background Color পরিবর্তন করুন"
-    )
-    public void SetCategoryBackgroundColor(
-            String categoryId,
-            String colorCode
-    ) {
-
-        GradientDrawable background =
-                backgrounds.get(categoryId);
-
-        if (background != null) {
-
-            try {
-
-                background.setColor(
-                        Color.parseColor(colorCode)
-                );
-
-            } catch (Exception e) {
-
-                ErrorOccurred(
-                        "SetCategoryBackgroundColor: "
-                        + e.getMessage()
-                );
-            }
-        }
-    }
-
-    // =========================================
-    // ৫. Corner Radius পরিবর্তন
-    // =========================================
-
-    @SimpleFunction(
-        description = "Category Card-এর Corner Radius পরিবর্তন করুন"
-    )
-    public void SetCategoryRadius(
-            String categoryId,
-            int radius
-    ) {
-
-        GradientDrawable background =
-                backgrounds.get(categoryId);
-
-        if (background != null) {
-
-            background.setCornerRadius(dp(radius));
-        }
-    }
-
-    // =========================================
-    // ৬. Image Size পরিবর্তন
-    // =========================================
-
-    @SimpleFunction(
-        description = "Category Image-এর Width এবং Height পরিবর্তন করুন"
-    )
-    public void SetCategoryImageSize(
-            String categoryId,
-            int width,
-            int height
-    ) {
-
-        ImageView image = images.get(categoryId);
-
-        if (image != null) {
-
-            LinearLayout.LayoutParams params =
-                    new LinearLayout.LayoutParams(
-                            dp(width),
-                            dp(height)
-                    );
-
-            image.setLayoutParams(params);
-        }
-    }
-
-    // =========================================
-    // ৭. Category Card Show/Hide
-    // =========================================
-
-    @SimpleFunction(
-        description = "Category Card Visible অথবা Invisible করুন"
-    )
-    public void SetCategoryVisible(
-            String categoryId,
-            boolean visible
-    ) {
-
-        LinearLayout card = cards.get(categoryId);
-
-        if (card != null) {
-
-            if (visible) {
-
-                card.setVisibility(View.VISIBLE);
-
-            } else {
-
-                card.setVisibility(View.GONE);
-            }
-        }
-    }
-
-    // =========================================
-    // ৮. একটি Category Card Remove করা
-    // =========================================
-
-    @SimpleFunction(
-        description = "Category Card মুছে ফেলুন"
-    )
-    public void RemoveCategory(
-            String categoryId
-    ) {
-
-        LinearLayout card = cards.get(categoryId);
-
-        if (card != null) {
-
-            // Parent থেকে Card সরানো
-            if (card.getParent() instanceof ViewGroup) {
-
-                ((ViewGroup) card.getParent())
-                        .removeView(card);
-            }
-
-            // Map থেকে সরানো
-            cards.remove(categoryId);
-            images.remove(categoryId);
-            titles.remove(categoryId);
-            backgrounds.remove(categoryId);
-        }
-    }
-
-    // =========================================
-    // ৯. সমস্ত Category Remove করা
-    // =========================================
-
-    @SimpleFunction(
-        description = "সমস্ত Category Card Remove করুন"
-    )
-    public void RemoveAllCategories() {
-
-        // Card ID-এর List
-        java.util.ArrayList<String> ids =
-                new java.util.ArrayList<>(cards.keySet());
-
-        // প্রতিটি Card Remove
-        for (String id : ids) {
-
-            RemoveCategory(id);
-        }
-    }
-
-    // =========================================
-    // ১০. Category Click Event
-    // =========================================
-
-    @SimpleEvent(
-        description = "Category Card Click করলে Event চালু হবে"
-    )
-    public void CategoryClicked(
-            String categoryId,
-            String categoryName
-    ) {
-
-        EventDispatcher.dispatchEvent(
-                this,
-                "CategoryClicked",
-                categoryId,
-                categoryName
+        imageTasks.put(
+            image,
+            task
         );
     }
 
-    // =========================================
-    // ১১. Error Event
-    // =========================================
+    // ======================================
+    // Set Card Radius
+    // ======================================
 
-    @SimpleEvent(
-        description = "Extension-এর কোনো সমস্যা হলে Event চালু হবে"
-    )
-    public void ErrorOccurred(
-            String message
-    ) {
+    @SimpleFunction
+    public void SetCornerRadius(int radius) {
 
-        EventDispatcher.dispatchEvent(
-                this,
-                "ErrorOccurred",
-                message
-        );
+        cardRadius = Math.max(0, radius);
     }
 
-    // =========================================
-    // ১২. DP থেকে Pixel-এ রূপান্তর
-    // =========================================
+    // ======================================
+    // Set Card Color
+    // ======================================
 
-    private int dp(int value) {
+    @SimpleFunction
+    public void SetCardColor(int color) {
+
+        cardColor = color;
+    }
+
+    // ======================================
+    // Set Title Color
+    // ======================================
+
+    @SimpleFunction
+    public void SetTitleColor(int color) {
+
+        titleColor = color;
+    }
+
+    // ======================================
+    // Set Image Height
+    // ======================================
+
+    @SimpleFunction
+    public void SetImageHeight(int height) {
+
+        imageHeight = Math.max(1, height);
+    }
+
+    // ======================================
+    // Set Placeholder Color
+    // ======================================
+
+    @SimpleFunction
+    public void SetPlaceholderColor(int color) {
+
+        placeholderColor = color;
+    }
+
+    // ======================================
+    // Set Ripple Color
+    // ======================================
+
+    @SimpleFunction
+    public void SetRippleColor(int color) {
+
+        rippleColor = color;
+    }
+
+    // ======================================
+    // Set Card Elevation
+    // ======================================
+
+    @SimpleFunction
+    public void SetCardElevation(float elevation) {
+
+        cardElevation = Math.max(0f, elevation);
+    }
+
+    // ======================================
+    // Get Card Count
+    // ======================================
+
+    @SimpleFunction
+    public int GetCardCount() {
+
+        return cardList.size();
+    }
+
+    // ======================================
+    // Get Category ID
+    // ======================================
+
+    @SimpleFunction
+    public String GetCategoryId(int index) {
+
+        if (index < 0 ||
+            index >= cardInfoList.size()) {
+
+            return "";
+        }
+
+        return cardInfoList.get(index).id;
+    }
+
+    // ======================================
+    // Get Category Title
+    // ======================================
+
+    @SimpleFunction
+    public String GetCategoryTitle(int index) {
+
+        if (index < 0 ||
+            index >= cardInfoList.size()) {
+
+            return "";
+        }
+
+        return cardInfoList.get(index).title;
+    }
+
+    // ======================================
+    // Cancel Image Requests
+    // ======================================
+
+    @SimpleFunction
+    public void CancelAllImageLoads() {
+
+        for (Future<?> task : imageTasks.values()) {
+
+            if (task != null) {
+                task.cancel(true);
+            }
+        }
+
+        imageTasks.clear();
+    }
+
+    // ======================================
+    // Clear All Cards
+    // ======================================
+
+    @SimpleFunction
+    public void ClearCards() {
+
+        // Image Request Cancel
+        CancelAllImageLoads();
+
+        // সব Card Remove
+        for (View card : cardList) {
+
+            if (card.getParent()
+                instanceof ViewGroup) {
+
+                ViewGroup parent =
+                    (ViewGroup) card.getParent();
+
+                parent.removeView(card);
+            }
+        }
+
+        cardList.clear();
+
+        cardInfoList.clear();
+
+        CardsCleared();
+    }
+
+    // ======================================
+    // DP Conversion
+    // ======================================
+
+    private int dp(float value) {
 
         return (int) (
-                value * context.getResources()
-                        .getDisplayMetrics()
-                        .density + 0.5f
+            value *
+            context.getResources()
+            .getDisplayMetrics()
+            .density + 0.5f
+        );
+    }
+
+    // ======================================
+    // EVENTS
+    // ======================================
+
+    @SimpleEvent
+    public void CategoryClicked(
+        String title,
+        int index
+    ) {
+
+        EventDispatcher.dispatchEvent(
+            this,
+            "CategoryClicked",
+            title,
+            index
+        );
+    }
+
+    @SimpleEvent
+    public void CategoryClickedWithId(
+        String categoryId,
+        String title,
+        int index
+    ) {
+
+        EventDispatcher.dispatchEvent(
+            this,
+            "CategoryClickedWithId",
+            categoryId,
+            title,
+            index
+        );
+    }
+
+    @SimpleEvent
+    public void CardAdded(
+        String title,
+        int index
+    ) {
+
+        EventDispatcher.dispatchEvent(
+            this,
+            "CardAdded",
+            title,
+            index
+        );
+    }
+
+    @SimpleEvent
+    public void ImageLoaded(
+        String title,
+        int index,
+        boolean success,
+        String message
+    ) {
+
+        EventDispatcher.dispatchEvent(
+            this,
+            "ImageLoaded",
+            title,
+            index,
+            success,
+            message
+        );
+    }
+
+    @SimpleEvent
+    public void CardsCleared() {
+
+        EventDispatcher.dispatchEvent(
+            this,
+            "CardsCleared"
+        );
+    }
+
+    @SimpleEvent
+    public void ErrorOccurred(String message) {
+
+        EventDispatcher.dispatchEvent(
+            this,
+            "ErrorOccurred",
+            message
         );
     }
 }
