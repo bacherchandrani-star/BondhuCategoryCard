@@ -41,6 +41,7 @@ import java.util.Map;
 
 // App Inventor Extension
 import com.google.appinventor.components.annotations.Extension;
+import com.google.appinventor.components.runtime.AndroidViewComponent;
 import com.google.appinventor.components.annotations.SimpleFunction;
 import com.google.appinventor.components.annotations.SimpleEvent;
 import com.google.appinventor.components.runtime.AndroidNonvisibleComponent;
@@ -228,7 +229,7 @@ public class BondhuCategoryCard
             card.setLayoutParams(cardParams);
 
             // Parent Layout-এ Card যোগ
-            parent.getView().addView(card);
+            ((AndroidViewComponent) parent).getView().addView(card);
 
             // Map-এ Card Save
             cards.put(categoryId, card);
