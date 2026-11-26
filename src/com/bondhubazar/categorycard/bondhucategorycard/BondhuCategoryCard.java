@@ -228,7 +228,7 @@ public class BondhuCategoryCard
             card.setLayoutParams(cardParams);
 
             // Parent Layout-এ Card যোগ
-            parent.$add(card);
+            parent.getView().addView(card);
 
             // Map-এ Card Save
             cards.put(categoryId, card);
